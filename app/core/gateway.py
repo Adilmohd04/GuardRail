@@ -18,7 +18,8 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     findings += detect_pii(request.prompt)
     for doc in request.context_docs:
         for finding in detect_rag_injection(doc.text) + detect_pii(doc.text):
-            findings.append(Finding(finding.tag, f"{doc.id}: {finding.evidence}"))
+            # doc.id comes from the caller, so redact it too (it could be an email).
+            findings.append(Finding(finding.tag, f"{redact_pii(doc.id)}: {finding.evidence}"))
 
     found_tags = {f.tag for f in findings}
     score = compute_risk_score(found_tags)

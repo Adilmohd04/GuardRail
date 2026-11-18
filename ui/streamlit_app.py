@@ -1,5 +1,6 @@
 """ Streamlit UI: input -> POST /analyze -> show response."""
 import os
+import time
 
 import requests
 import streamlit as st
@@ -36,6 +37,7 @@ if analyze_clicked:
     }
     try:
         with st.spinner("Analyzing..."):
+            time.sleep(0.6)  # shortcut: the API answers in ms, so this keeps the spinner visible for the demo
             resp = requests.post(f"{API_BASE_URL}/analyze", json=payload, timeout=15)
     except requests.RequestException:
         st.error(f"Cannot reach the API at {API_BASE_URL}. Is it running?")

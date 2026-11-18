@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI
 
+from app.core.detectors import redact_pii
 from app.core.gateway import analyze
 from app.core.scoring import POLICY
 from app.schemas import AnalyzeRequest, AnalyzeResponse, PolicyResponse
@@ -22,7 +23,7 @@ def analyze_endpoint(request: AnalyzeRequest) -> AnalyzeResponse:
     logger.info(
         "time=%s request_id=%r decision=%s score=%d tags=%s docs=%d",
         datetime.now(timezone.utc).isoformat(),
-        (request.metadata.request_id or "")[:64],
+        redact_pii(request.metadata.request_id or "")[:64],  # caller-supplied, so redact
         result.decision,
         result.risk_score,
         result.risk_tags,
