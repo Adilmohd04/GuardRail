@@ -57,7 +57,7 @@ Open http://localhost:8501, type a prompt, optionally paste up to 3 documents, a
 
 ## Sample
 
-Input (`sample_request.json`, shortened):
+Input (`sample_request.json`):
 
 ```json
 {
@@ -66,7 +66,7 @@ Input (`sample_request.json`, shortened):
 }
 ```
 
-Output (full file: `sample_output.json`, shortened):
+Output (full file: `sample_output.json`):
 
 ```json
 {
@@ -93,6 +93,6 @@ PII adds 40, each injection category adds 80, total capped at 100. Score 80 or m
 
 ## AI tool usage
 
-I used AI (Kiro and Claude Code) for boilerplate (Dockerfiles, FastAPI/Pydantic models, CLI and Streamlit layout), regex help, test ideas and documentation drafts. My part was understanding the problem, brainstorming the approach, gathering requirements and orchestrating the agents. I then tested it manually like an attacker: typos, hidden characters, look-alike letters, instructions hidden in documents, and normal prompts that should not be blocked. When I found a bypass or a false alarm, I prompted the fix and added a test. I chose the main tradeoffs and can explain the request flow, the scoring and the limits.
+I used AI (Claude Code) for boilerplate (Dockerfiles, FastAPI/Pydantic models, CLI and Streamlit layout), regex help, test ideas and documentation drafts. My part was understanding the problem, brainstorming the approach, gathering requirements and orchestrating the agents. I then tested it manually like an attacker: typos, hidden characters, look-alike letters, instructions hidden in documents and normal prompts that should not be blocked. When I found a bypass or a false alarm, I prompted the fix and added a test. I chose the main tradeoffs and can explain the request flow, the scoring and the limits.
 
 Verified by running: 150 tests pass, `docker compose up --build` starts the API and UI, and the CLI output matches `sample_output.json`.
