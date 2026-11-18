@@ -4,6 +4,13 @@ A small guardrails gateway for GenAI apps. It checks a prompt and optional docum
 
 It detects **prompt injection**, **RAG injection** (instructions hidden in documents) and **PII** (emails, phone numbers).
 
+## Get the code
+
+```bash
+git clone https://github.com/Adilmohd04/GuardRail.git
+cd GuardRail
+```
+
 ## Run
 
 ```bash
