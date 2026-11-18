@@ -4,6 +4,13 @@ A small guardrails gateway for GenAI apps. It checks a prompt and optional docum
 
 It detects **prompt injection**, **RAG injection** (instructions hidden in documents) and **PII** (emails, phone numbers).
 
+## Live demo
+
+- UI: https://guardrail-1-a3ip.onrender.com/
+- API: https://guardrail-g8wj.onrender.com/policy (and `POST /analyze`)
+
+Hosted on Render's free tier, so the first request after idle can take about a minute to wake up. Open the API link first, then the UI. The hosted API has no auth, because it is a stateless demo.
+
 ## Get the code
 
 ```bash
