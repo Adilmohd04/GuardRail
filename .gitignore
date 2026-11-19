@@ -4,18 +4,3 @@ __pycache__/
 .venv/
 .env
 out.json
-# Confidential assignment documents must never be committed
-*.pdf
-project-1-*
-handbook-*
-submission-checklist*
-technical-handbook*
-
-# Personal study notes, not part of the submission
-interview-notes/
-
-# ReqGuard validation artifacts (kept locally for the interview, not part of the submission)
-reqguard-report/
-reqguard-test/
-reqguard.yaml
-requirements.md
