@@ -46,6 +46,9 @@ if analyze_clicked:
     if resp.status_code == 422:
         st.error("Invalid input: the prompt must not be empty.")
         st.stop()
+    if resp.status_code == 400:
+        st.error(f"Invalid input: {resp.json().get('detail', 'bad request')}.")
+        st.stop()
     if resp.status_code != 200:
         st.error(f"API error (HTTP {resp.status_code}).")
         st.stop()

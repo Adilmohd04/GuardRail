@@ -1,10 +1,15 @@
 FROM python:3.11-slim
+ENV PYTHONDONTWRITEBYTECODE=1
+RUN useradd --create-home --uid 10001 appuser
 WORKDIR /app
 COPY requirements.api.txt ./
 RUN pip install --no-cache-dir -r requirements.api.txt
-COPY app ./app
-COPY cli.py ./cli.py
-COPY sample_request.json ./sample_request.json
-COPY pytest.ini ./pytest.ini
-COPY tests ./tests
+COPY --chown=appuser:appuser app ./app
+COPY --chown=appuser:appuser cli.py sample_request.json pytest.ini ./
+COPY --chown=appuser:appuser tests ./tests
+RUN chown appuser:appuser /app
+USER appuser
+# Healthy once GET /policy answers. Python is used because the slim image has no curl.
+HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=10 \
+  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/policy', timeout=2)"]
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

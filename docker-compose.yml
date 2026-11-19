@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile.api
     ports:
       - "8000:8000"
+    # Health check comes from Dockerfile.api (GET /policy).
   ui:
     build:
       context: .
@@ -14,4 +15,5 @@ services:
     ports:
       - "8501:8501"
     depends_on:
-      - api
+      api:
+        condition: service_healthy  # start the UI only after the API answers
