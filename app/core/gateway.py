@@ -24,7 +24,7 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     found_tags = {f.tag for f in findings}
     score = compute_risk_score(found_tags)
 
-    # Sanitised fields are always PII-redacted, whatever the decision.
+    # Sanitized fields are always PII-redacted, whatever the decision.
     # On "block" the caller should not forward the content at all.
     return AnalyzeResponse(
         decision=decide(score),
