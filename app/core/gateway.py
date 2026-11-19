@@ -32,7 +32,8 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
         risk_tags=[tag for tag in POLICY["detectors"] if tag in found_tags],
         sanitized_prompt=redact_pii(request.prompt),
         sanitized_context_docs=[
-            SanitizedDoc(id=doc.id, text=redact_pii(doc.text)) for doc in request.context_docs
+            SanitizedDoc(id=redact_pii(doc.id), text=redact_pii(doc.text))
+            for doc in request.context_docs
         ],
         reasons=[Reason(tag=f.tag, evidence=f.evidence) for f in findings],
     )

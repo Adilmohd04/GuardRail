@@ -104,3 +104,9 @@ def test_pii_in_request_id_is_not_logged(caplog):
     with caplog.at_level("INFO", logger="guardrails"):
         client.post("/analyze", json=body)
     assert "bob@example.com" not in caplog.text and "REDACTED_EMAIL" in caplog.text
+
+
+def test_pii_in_document_id_is_redacted_in_sanitized_docs():
+    body = {"prompt": "Hello", "context_docs": [{"id": "alex@example.com", "text": "fine"}]}
+    data = client.post("/analyze", json=body).json()
+    assert "alex@example.com" not in str(data)
