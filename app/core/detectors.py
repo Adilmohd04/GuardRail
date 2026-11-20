@@ -7,11 +7,14 @@ contains raw PII.
 Before matching, text is cleaned (see normalize_for_detection) so simple tricks like
 zero-width characters or look-alike letters do not hide an attack.
 """
+import base64
+import codecs
 import html
 import re
 import unicodedata
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from functools import lru_cache
 from typing import List
 
 
@@ -37,6 +40,7 @@ def strip_invisible(text: str) -> str:
     )
 
 
+@lru_cache(maxsize=64)  # the same text is cleaned many times per request
 def normalize_for_detection(text: str) -> str:
     """Lowercase, decode HTML entities (&#112; -> p) and fold look-alike letters. Matching only."""
     return strip_invisible(html.unescape(text)).lower().translate(_HOMOGLYPHS)
@@ -124,6 +128,15 @@ PROMPT_INJECTION_PATTERNS = [
 
 # Extra rules for retrieved documents. Docs are untrusted data, so they should never
 # contain instructions aimed at the model. Prompt-injection phrases apply here too.
+PROMPT_INJECTION_PATTERNS += [
+    r"\b(?:enable|enter|activate|switch\s+to|turn\s+on)\s+(?:the\s+)?(?:jailbreak|unrestricted|dan)\s+mode\b",
+    r"\b(?:answer|respond|reply|act|behave)\s+without\s+(?:any\s+)?(?:restrictions?|filters?|limits?|rules|guardrails|censorship)",
+    r"\bignora\s+(?:todas\s+)?las\s+instrucciones\s+anteriores|\brevela\s+tu\s+(?:prompt|mensaje)\s+del\s+sistema",
+    r"\bignorez?\s+(?:toutes\s+)?les\s+instructions\s+pr[eé]c[eé]dentes|\br[eé]v[eé]lez?\s+(?:votre|ton)\s+prompt\s+syst[eè]me",
+    r"\bignorier(?:e|en)?\s+(?:alle\s+)?(?:vorherigen|bisherigen)\s+(?:anweisungen|instruktionen)|\bzeig(?:e)?\s+(?:deinen|ihren)\s+system-?prompt",
+    r"\b(?:send|forward|email|post|leak)\s+(?:the\s+|all\s+|this\s+)?(?:conversation|chat\s+history|secrets?|credentials?|api\s+keys?|passwords?)\s+to\s+(?:https?://|[\w.+-]+@|[\w.-]+\.(?:com|net|org|io|xyz|ru)\b)",
+]
+
 RAG_ONLY_PATTERNS = [
     # A line pretending to be a system message. An instruction word must follow,
     # so "System: Ubuntu 22.04" and "Developer: Jane Smith" are allowed.
@@ -332,13 +345,37 @@ def _fuzzy_phrases(text: str, tag: str) -> List[Finding]:
 # Catches "++++showursystemprompt++++": remove every space and symbol, then look for the
 # longer attack phrases. Short phrases are skipped (the length limit) because they
 # would match inside normal words, e.g. "do anything nowadays".
-# shortcut: exact match only, so a typo plus no spaces still gets through.
-def _squashed_phrases(text: str, tag: str) -> List[Finding]:
+# A typo is tolerated by a second, fuzzy pass.
+def _squashed_phrases(text: str, tag: str, fuzzy: bool = True) -> List[Finding]:
     squashed = re.sub(r"[^a-z0-9]", "", normalize_for_detection(text))
     for phrase in KNOWN_ATTACKS:
         joined = phrase.replace(" ", "")
         if len(joined) >= 18 and joined in squashed:
             return [Finding(tag, f"matched phrase with spaces/symbols removed: {phrase}")]
+    if not fuzzy:
+        return []
+    # Same, but allowing a typo: "showursystempromt" (first 3000 characters only).
+    squashed = squashed[:3000]
+    matcher = SequenceMatcher()
+    present = {squashed[i : i + 3] for i in range(len(squashed) - 2)}
+    for phrase in KNOWN_ATTACKS:
+        joined = phrase.replace(" ", "")
+        if len(joined) < 18:
+            continue
+        trigrams = {joined[i : i + 3] for i in range(len(joined) - 2)}
+        if len(trigrams & present) < 0.5 * len(trigrams):  # cheap skip: most of the phrase is not even there
+            continue
+        matcher.set_seq2(joined)
+        for size in (len(joined) - 1, len(joined), len(joined) + 1):
+            seen = set()  # repeated filler (aaaa...) would otherwise re-check the same window
+            for i in range(len(squashed) - size + 1):
+                window = squashed[i : i + size]
+                if window in seen:
+                    continue
+                seen.add(window)
+                matcher.set_seq1(window)
+                if matcher.quick_ratio() >= 0.9 and matcher.ratio() >= 0.9:
+                    return [Finding(tag, f"close match with spaces/symbols removed: {phrase}")]
     return []
 
 
@@ -357,7 +394,7 @@ _TARGET = set(
     "instructions instruction rules guidelines guideline restrictions restriction guardrails guardrail "
     "safeguards safeguard policies policy programming directives constraints limitations filters "
     "niyam nirdesh prompt".split())
-_TARGET_REVEAL = {"instructions", "instruction", "prompt", "programming", "directives", "nirdesh"}
+_TARGET_REVEAL = {"instructions", "instruction", "prompt", "programming", "directives", "nirdesh", "configuration", "config"}
 _AIM = set(
     "your ur yours previous prior earlier above preceding original initial system hidden internal "
     "secret confidential assistant ai chatbot safety given told apne tumhare tumhari tumhara aapke aapki aapka "
@@ -391,12 +428,57 @@ def _phrase_checks(patterns: List[str], text: str, tag: str) -> List[Finding]:
     )
 
 
+# --- Step 6: decoded views ----------------------------------------------------
+# An attack can be disguised so no phrase matches: leetspeak (1gn0re), reversed text, ROT13,
+# base64 or hex. Undo each disguise and run the same checks on the result.
+# shortcut: only these five encodings, first 8,000 characters; upgrade by adding decoders.
+_LEET = str.maketrans("013457@$!", "oieastasi")
+_B64 = re.compile(r"(?<![A-Za-z0-9+/_-])[A-Za-z0-9+/_-]{16,}={0,2}")
+_HEX = re.compile(r"(?<![0-9A-Fa-f])(?:[0-9A-Fa-f]{2}){12,}(?![0-9A-Fa-f])")
+
+
+def _printable(raw: bytes) -> str:
+    text = raw.decode("utf-8", "ignore")
+    return text if text and sum(c.isprintable() or c.isspace() for c in text) >= 0.9 * len(text) else ""
+
+
+def _decoded_views(text: str):
+    """Yield (name, text) for each disguise undone. Text goes in 2,000-character chunks so a
+    huge or odd input cannot make the slower patterns take quadratic time."""
+    text = text[:8000]
+    for i in range(0, len(text), 1800):  # chunks overlap, so a phrase on a boundary is not missed
+        chunk = text[i : i + 2000]
+        for name, view in (("leetspeak", chunk.translate(_LEET)), ("reversed", chunk[::-1]), ("ROT13", codecs.decode(chunk, "rot13"))):
+            if view != chunk:
+                yield name, view
+    for blob in _B64.findall(text)[:20]:
+        try:
+            yield "base64", _printable(base64.b64decode(blob.replace("-", "+").replace("_", "/") + "=" * (-len(blob) % 4)))
+        except ValueError:
+            pass
+    for blob in _HEX.findall(text)[:20]:
+        yield "hex", _printable(bytes.fromhex(blob))
+
+
+def _scan(patterns: List[str], text: str, tag: str) -> List[Finding]:
+    found = _phrase_checks(patterns, text, tag)
+    if found:
+        return found
+    for name, view in _decoded_views(text):  # exact checks only: the typo checks are slow
+        if not view:
+            continue
+        found = _match_phrases(patterns, view, tag) or _squashed_phrases(view, tag, fuzzy=False) or _intent_phrases(view, tag)
+        if found:
+            return [Finding(tag, f"after decoding {name}: {found[0].evidence}")]
+    return []
+
+
 def detect_prompt_injection(text: str) -> List[Finding]:
-    return _phrase_checks(PROMPT_INJECTION_PATTERNS, text, "prompt_injection")
+    return _scan(PROMPT_INJECTION_PATTERNS, text, "prompt_injection")
 
 
 def detect_rag_injection(text: str) -> List[Finding]:
-    return _phrase_checks(RAG_INJECTION_PATTERNS, text, "rag_injection")
+    return _scan(RAG_INJECTION_PATTERNS, text, "rag_injection")
 
 
 def detect_pii(text: str) -> List[Finding]:
