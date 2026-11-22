@@ -137,6 +137,45 @@ PROMPT_INJECTION_PATTERNS += [
     r"\b(?:send|forward|email|post|leak)\s+(?:the\s+|all\s+|this\s+)?(?:conversation|chat\s+history|secrets?|credentials?|api\s+keys?|passwords?)\s+to\s+(?:https?://|[\w.+-]+@|[\w.-]+\.(?:com|net|org|io|xyz|ru)\b)",
 ]
 
+# Found by testing against a public dataset and our own Indian-context attacks. Each rule is narrow
+# on purpose, so ordinary text ("cancel my previous order", "ignore the rules of chess") still passes.
+PROMPT_INJECTION_PATTERNS += [
+    # override: more nouns than "instructions", and "forget about ..."
+    r"\b(?:ignore|disregard|forget|abandon|overrule|set\s+aside)\s+(?:about\s+)?(?:all\s+|any\s+|the\s+|your\s+)*(?:preceding|above)\s+orders\b",
+    r"\b(?:ignore|disregard|forget|abandon|overrule|override|set\s+aside|remove|leave)\s+(?:about\s+)?(?:all\s+|any\s+|the\s+|your\s+|these\s+|those\s+|every\s+)*(?:previous|prior|preceding|earlier|above|former|existing|original)\s+(?:instructions?|directions|directives|commands|tasks|assignments|information|guidance|context)\b",
+    r"\b(?:ignore|disregard|forget|abandon|overrule|set\s+aside)\s+(?:about\s+)?(?:all|any|every)\s+(?:the\s+|of\s+the\s+|your\s+)?(?:instructions|orders|directions|directives|commands|assignments)\b",
+    r"\b(?:forget|ignore)\s+about\s+everything\b|\bignore\s+everything\b",
+    r"\bcancel\s+(?:the\s+|all\s+|your\s+)(?:instructions|orders|rules|guidelines)\b",
+    r"\b(?:whatever|everything|anything)\s+you\s+(?:were|have\s+been)\s+(?:told|given|instructed)\b[^.]{0,40}\b(?:no\s+longer\s+applies|does\s?n.?t\s+apply|is\s+void)",
+    r"\bignore\s+(?:the\s+)?(?:user|customer)(?:'s)?\s+(?:question|request|message|query|input)s?\b",
+    r"\bstop\s+being\s+(?:a|an|the)\s+(?:\w+\s+){0,2}(?:bot|assistant|ai|chatbot|model)\b",
+    # changing the rules or the job
+    r"\b(?:change|update|replace|modify|rewrite)\s+your\s+(?:instructions?|rules|guidelines|programming|prompt|directives)\b",
+    r"\byour\s+(?:instructions|rules|guidelines|task)\s+(?:are|is)\s+now\b",
+    r"\b(?:new|additional)\s+(?:instructions?|tasks?|statement|assignment)s?\s*(?:follow|[-:]|are\b)",
+    r"\bpretend\b[^.]{0,20}\b(?:safety\s+)?(?:rules|restrictions|guidelines|policies)\s+(?:do\s+not|don.?t|no\s+longer)\s+apply\b",
+    # skipping controls
+    r"\b(?:bypass|override|disregard|circumvent|ignore)\s+(?:the\s+|all\s+|your\s+)?(?:kyc|aml|fraud|compliance|verification|authentication|authorization|otp)\s+(?:policy|policies|checks?|rules?|guidelines?|controls?|measures?|requirements?)\b",
+    # a wider "without restrictions"
+    r"\b(?:answer|respond|reply|act|behave)\s+without\s+(?:any\s+)?(?:safety\s+|content\s+|ethical\s+|moral\s+)?(?:restrictions?|filters?|limits?|rules|guardrails|censorship)\b",
+    # extraction
+    r"\b(?:print|show|display|repeat|output|return|write)\s+(?:out\s+)?everything\s+(?:that\s+is\s+)?(?:written\s+)?(?:above|before)\b",
+    r"\bwhat\s+(?:is|was)\s+written\s+(?:above|before|at\s+the\s+beginning)\b",
+    r"\b(?:list|show|print|reveal|give\s+me|send)\s+(?:me\s+)?(?:all|every|each)\s+[\w\s]{0,30}\b(?:in|from)\s+your\s+(?:context|memory|database|knowledge\s+base)\b",
+    r"\b(?:show|reveal|print|display|share|tell)\s+(?:me\s+)?(?:the\s+|your\s+)?(?:confidential|hidden|secret|internal)\s+(?:setup|configuration|config|prompt|instructions?|text|message)\b",
+    # notes aimed at the model, and fake system headers
+    r"\b(?:note|message|instruction|attention|hidden\s+instruction)\s+(?:to|for)\s+(?:the\s+)?(?:ai|assistant|model|llm|agent|chatbot)\b",
+    r"\bai\s+agent\s+reading\s+this\b",
+    r"^[ \t]*(?:\[system\]|#{2,}[ \t]*system\b)",
+    # Hinglish
+    r"\bkoi\s+(?:rules?|niyam|restrictions?|filters?|pabandi)\s+nahi\b",
+    r"\bbina\s+(?:kisi\s+)?(?:filter|restriction|rules?|niyam)\w*\s+ke\b",
+    r"\bbhool\s+jao\s+ki\s+tum\b|\bsirf\s+meri\s+baat\s+suno\b",
+    r"\bniyam\s+(?:tod|todo|cancel)\b",
+    r"\b(?:rules?|niyam|policy)\s+(?:ko\s+)?skip\s+kar",
+    r"\bapne\s+(?:andar\s+ke\s+)?(?:instructions?|niyam|nirdesh)\s+(?:kya|batao|dikhao|print)",
+]
+
 RAG_ONLY_PATTERNS = [
     # A line pretending to be a system message. An instruction word must follow,
     # so "System: Ubuntu 22.04" and "Developer: Jane Smith" are allowed.
@@ -305,7 +344,9 @@ def _match_phrases(patterns: List[str], text: str, tag: str) -> List[Finding]:
         match = re.search(pattern, clean, re.IGNORECASE | re.MULTILINE)
         if match:
             phrase = redact_pii(" ".join(match.group(0).split()))  # evidence must never carry PII
-            findings.append(Finding(tag, f"matched phrase: {phrase}"))
+            finding = Finding(tag, f"matched phrase: {phrase}")
+            if finding not in findings:  # two rules can match the same words
+                findings.append(finding)
     return findings
 
 
@@ -473,8 +514,49 @@ def _scan(patterns: List[str], text: str, tag: str) -> List[Finding]:
     return []
 
 
+# --- Step 7: asking about a phrase vs using it ---------------------------------
+# "What does 'ignore previous instructions' mean?" asks about an attack; it does not make one.
+# Split the text into clauses. A clause that holds an attack phrase is only a mention when it
+# is framed as a question or an example AND asks for nothing: no secret to reveal, no command
+# after the phrase, nothing after a colon. Every other clause is scanned as before, so a
+# command hidden after a harmless question is still caught. Prompts only; documents stay strict.
+# shortcut: fixed English/Hinglish question frames; upgrade to a trained classifier.
+_FRAME = re.compile(
+    r"\b(?:meaning of|what (?:does|do) .{0,60}?(?:mean|do|say)|mean(?:s|ing)\b|explain|define|definition|describe"
+    r"|for example|such as|example of|e\.g|why (?:do|does|would|is|are)(?! you)"
+    r"|how (?:do|does|can|to) .{0,40}?(?:protect|detect|stop|prevent|defend|block|spot)"
+    r"|known (?:jailbreak|attack)|jailbreak phrase"
+    r"|(?:attackers?|hackers?|people|someone|users?|teacher|they) (?:\w+ ){0,2}(?:type|write|say|use|send|put|try|tried)\b"
+    r"|matlab|kya hota hai)")
+_COMMAND_AFTER = re.compile(
+    r"\b(?:and|then|now|also|but|so|phir|fir|aur)\s+(?:please\s+)?(?:\w+\s+){0,2}?"
+    r"(?:reveal|print|leak|dump|send|forward|email|approve|ignore|forget|disregard|bypass|batao|dikhao)\b")
+_QUOTED = re.compile(r"(?<!\w)'[^']+'(?!\w)|[\"“‘][^\"”’]+[\"”’]")
+
+
+def _is_mention(clause: str, patterns: List[str], tag: str) -> bool:
+    if not _phrase_checks(patterns, clause, tag):
+        return False  # no attack phrase here, nothing to excuse
+    plain = _QUOTED.sub(" ", normalize_for_detection(clause))
+    if not _FRAME.search(plain) or _COMMAND_AFTER.search(plain):
+        return False
+    words = re.findall(r"[^\W_]+", plain)
+    if any(w in _REVEAL and _TARGET_REVEAL.intersection(words[i + 1 : i + 7]) for i, w in enumerate(words)):
+        return False  # it asks for the prompt or instructions, so it is a request
+    after_colon = plain.split(":", 1)[1] if ":" in plain else ""
+    return not _phrase_checks(patterns, after_colon, tag) if after_colon else True
+
+
 def detect_prompt_injection(text: str) -> List[Finding]:
-    return _scan(PROMPT_INJECTION_PATTERNS, text, "prompt_injection")
+    tag, found = "prompt_injection", _scan(PROMPT_INJECTION_PATTERNS, text, "prompt_injection")
+    if not found:
+        return found
+    clauses = [c for c in re.split(r"(?<=[.?!;])\s+|\n+", text) if c.strip()]
+    if len(clauses) > 20:
+        return found  # too long to judge clause by clause
+    rest = [c for c in clauses if not _is_mention(c, PROMPT_INJECTION_PATTERNS, tag)]
+    # Rescan what is left: a disguised attack elsewhere in the text must still be caught.
+    return found if len(rest) == len(clauses) else _scan(PROMPT_INJECTION_PATTERNS, " ".join(rest), tag)
 
 
 def detect_rag_injection(text: str) -> List[Finding]:
