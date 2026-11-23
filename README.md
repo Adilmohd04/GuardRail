@@ -101,7 +101,7 @@ Input rules: `prompt` is required, and `metadata` with `app_id`, `user_id` and `
 
 The rules only know the wordings we wrote down, so a reworded attack passes. To measure that gap, `classifier/train.py` trains a small offline model (TF-IDF + logistic regression; scikit-learn is used for training only). Its weights are a plain JSON file (`app/core/intent_weights.json`) and the API scores with plain Python, so there is no new runtime dependency and no external API.
 
-It is opt-in: `POST /analyze?classifier=true` (the Streamlit toggle **Experimental: add classifier** sends it). Without the flag the API behaves exactly as described above. With it, the prompt gets a second opinion after the rules:
+It is opt-in: `POST /analyze?classifier=true` (the Streamlit toggle **Experimental: add classifier** sends it). Without the flag the API behaves exactly as described above. With it, the prompt and each context document get a second opinion after the rules (for documents only the block level applies, and a blocked document becomes `[REMOVED: rag injection]`):
 
 - score 0.95 or higher: **block**, risk score 80, and the prompt is removed like a rule hit (`[REMOVED: prompt injection]`);
 - score 0.73 to 0.95: **transform**, risk score 40, tag `intent_classifier`, text passed unchanged and flagged for review;

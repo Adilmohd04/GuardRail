@@ -86,3 +86,30 @@ def test_flag_is_ignored_when_the_weights_are_missing(monkeypatch):
         assert post(REWORDED, classifier=True)["decision"] == "allow"
     finally:
         gateway._model.cache_clear()
+
+
+# --- documents ---------------------------------------------------------------------------------
+def post_doc(text, classifier=None):
+    url = "/analyze" + ("?classifier=true" if classifier else "")
+    body = {"prompt": "Summarise the attached note.", "context_docs": [{"id": "d1", "text": text}], "metadata": META}
+    return client.post(url, json=body).json()
+
+
+def test_classifier_blocks_a_reworded_attack_planted_in_a_document():
+    assert post_doc(REWORDED)["decision"] == "allow"  # no rule lists it
+    body = post_doc(REWORDED, classifier=True)
+    assert body["decision"] == "block" and body["risk_tags"] == ["rag_injection"]
+    assert body["sanitized_context_docs"][0]["text"] == "[REMOVED: rag injection]"
+    assert body["sanitized_prompt"] == "Summarise the attached note."
+
+
+def test_classifier_leaves_normal_documents_alone():
+    notes = (
+        "Meeting notes, Monday 10 am. Agenda: quarterly sales review and the hiring plan. "
+        "Action items: Priya to share the revised budget by Friday. Next meeting on 2 December.",
+        "The system requirements for the app are Windows 10 or later and 8 GB of RAM. "
+        "To install, follow the instructions on the download page and restart your computer.",
+        "Dear customer, your order has shipped and will arrive on Thursday. Thank you for shopping with us.",
+    )
+    for text in notes:
+        assert post_doc(text, classifier=True)["decision"] == "allow"

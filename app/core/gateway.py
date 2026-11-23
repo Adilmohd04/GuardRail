@@ -65,6 +65,9 @@ def analyze(request: AnalyzeRequest, classifier: bool = False) -> AnalyzeRespons
     doc_attacks: List[List[Finding]] = []
     for doc in request.context_docs:
         doc_attack = _attacks(detect_rag_injection, doc.text)
+        verdict = _classify(doc.text) if classifier and not doc_attack else None
+        if verdict and verdict.tag == "prompt_injection":  # documents: block level only, the review band was too noisy on normal text
+            doc_attack = [Finding("rag_injection", verdict.evidence)]  # same handling as a rule hit: the document is removed
         doc_attacks.append(doc_attack)
         for finding in doc_attack + detect_pii(doc.text):
             # doc.id comes from the caller, so redact it too (it could be an email).

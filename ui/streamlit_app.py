@@ -96,7 +96,7 @@ if analyze_clicked:
         said = [r["evidence"] for r in data["reasons"] if r["evidence"].startswith("classifier:")]
         st.caption(
             (said[0] if said else "The classifier added nothing here.")
-            + " It learns word patterns, not meaning, so it can be wrong in both directions. Prompt only."
+            + " It learns word patterns, not meaning, so it can be wrong in both directions. Prompt and documents."
         )
 
     st.subheader("Sanitized prompt")
