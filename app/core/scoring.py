@@ -8,7 +8,8 @@ POLICY = {
 }
 
 # One fixed score per risk category. Not a probability, just a policy choice.
-RISK_SCORES = {"pii": 40, "prompt_injection": 80, "rag_injection": 80}
+# "intent_classifier" is only used when a request asks for the optional classifier.
+RISK_SCORES = {"pii": 40, "prompt_injection": 80, "rag_injection": 80, "intent_classifier": 40}
 
 
 def compute_risk_score(tags: Iterable[str]) -> int:

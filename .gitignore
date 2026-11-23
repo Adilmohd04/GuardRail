@@ -1,6 +1,33 @@
+# Python
 __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
+venv/
+
+# Secrets and local output
 .env
+.env.*
 out.json
+
+# Confidential assignment documents (never commit)
+*.pdf
+
+# Personal study notes (not part of the submission)
+interview-notes/
+
+# reqguard tool files (local testing only)
+reqguard.yaml
+reqguard-report/
+reqguard-test/
+requirements.md
+
+# Classifier training data (large, downloaded; the trained weights in app/core are kept)
+classifier/data/
+
+# Editor and OS files
+.vscode/
+.idea/
+.kiro/
+.DS_Store
+Thumbs.db

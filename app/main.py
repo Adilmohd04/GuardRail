@@ -17,13 +17,13 @@ app = FastAPI(title="GuardRail Mini", docs_url=None, redoc_url=None, openapi_url
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)
-def analyze_endpoint(request: AnalyzeRequest) -> AnalyzeResponse:
+def analyze_endpoint(request: AnalyzeRequest, classifier: bool = False) -> AnalyzeResponse:  # ?classifier=true adds the optional model
     # 400, not 422: the shape is valid, but two documents claim the same id.
     # Same cleaning as the detectors, so look-alike letters and zero-width characters count as the same id.
     ids = [normalize_for_detection(doc.id).strip() for doc in request.context_docs]
     if len(ids) != len(set(ids)):
         raise HTTPException(status_code=400, detail="duplicate context_docs id")
-    result = analyze(request)
+    result = analyze(request, classifier)
     # Metadata only. Never log the prompt, the docs or the evidence (they may hold PII).
     logger.info(
         "time=%s request_id=%r decision=%s score=%d tags=%s docs=%d",

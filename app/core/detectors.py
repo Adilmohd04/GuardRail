@@ -368,10 +368,15 @@ KNOWN_ATTACKS = [
 ]
 
 
+# Small words an attacker can add or drop ("ignore THE previous instrucution"): left out of both sides.
+_FILLER_WORDS = {"the", "all", "any", "your", "ur", "my", "these", "those", "every", "pls", "plz", "please", "kindly", "just"}
+
+
 def _fuzzy_phrases(text: str, tag: str) -> List[Finding]:
-    words = re.findall(r"[a-z0-9']+", normalize_for_detection(text))[:2000]
+    words = [w for w in re.findall(r"[a-z0-9']+", normalize_for_detection(text))[:2000] if w not in _FILLER_WORDS]
     matcher = SequenceMatcher()
-    for phrase in KNOWN_ATTACKS:
+    for known in KNOWN_ATTACKS:
+        phrase = " ".join(w for w in known.split() if w not in _FILLER_WORDS)
         matcher.set_seq2(phrase)
         size = len(phrase.split())
         for i in range(len(words) - size + 1):
@@ -531,6 +536,12 @@ _FRAME = re.compile(
 _COMMAND_AFTER = re.compile(
     r"\b(?:and|then|now|also|but|so|phir|fir|aur)\s+(?:please\s+)?(?:\w+\s+){0,2}?"
     r"(?:reveal|print|leak|dump|send|forward|email|approve|ignore|forget|disregard|bypass|batao|dikhao)\b")
+# "...mean? Then do what it says": anywhere in the text, a request to carry out the phrase.
+_OBEY = re.compile(
+    r"\b(?:do|follow|obey|execute|run|apply|comply with)\s+(?:what|exactly)\b"
+    r"|\b(?:can|could|will|would)\s+you\s+(?:please\s+)?(?:do|follow|obey|execute|run)\s+(?:it|that|this|them)\b"
+    r"|\b(?:and|then)\s+(?:please\s+)?(?:do|follow|obey|execute|run)\s+(?:it|that|this|them)\b"
+    r"|\b(?:answer|respond|reply)\s+(?:exactly|literally|as)\b|\bcarry (?:it|that|this) out\b")
 _QUOTED = re.compile(r"(?<!\w)'[^']+'(?!\w)|[\"“‘][^\"”’]+[\"”’]")
 
 
@@ -552,8 +563,8 @@ def detect_prompt_injection(text: str) -> List[Finding]:
     if not found:
         return found
     clauses = [c for c in re.split(r"(?<=[.?!;])\s+|\n+", text) if c.strip()]
-    if len(clauses) > 20:
-        return found  # too long to judge clause by clause
+    if len(clauses) > 20 or _OBEY.search(normalize_for_detection(text)):
+        return found  # too long to judge clause by clause, or it asks the assistant to act on the phrase
     rest = [c for c in clauses if not _is_mention(c, PROMPT_INJECTION_PATTERNS, tag)]
     # Rescan what is left: a disguised attack elsewhere in the text must still be caught.
     return found if len(rest) == len(clauses) else _scan(PROMPT_INJECTION_PATTERNS, " ".join(rest), tag)

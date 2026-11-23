@@ -1,6 +1,7 @@
 """Orchestration: run the detectors, score, decide, and build the response."""
 import re
-from typing import Callable, List
+from functools import lru_cache
+from typing import Callable, List, Optional
 
 from app.core.detectors import (
     Finding,
@@ -9,6 +10,7 @@ from app.core.detectors import (
     detect_rag_injection,
     redact_pii,
 )
+from app.core import intent_model
 from app.core.scoring import POLICY, compute_risk_score, decide
 from app.schemas import AnalyzeRequest, AnalyzeResponse, Reason, SanitizedDoc
 
@@ -31,10 +33,33 @@ def _sanitize(text: str, attack: List[Finding], label: str) -> str:
     return f"[REMOVED: {label}]" if attack else redact_pii(text)
 
 
-def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
+@lru_cache(maxsize=1)
+def _model():
+    return intent_model.load()  # None if the weights file is missing: the flag is then ignored
+
+
+def _classify(text: str) -> Optional[Finding]:
+    """Optional second opinion on text the rules allowed. Rules still win: this only adds risk."""
+    model = _model()
+    if model is None:
+        return None
+    score = model.score(text)
+    if score >= intent_model.BLOCK_AT:
+        return Finding("prompt_injection", f"classifier: intent resembles an instruction to the assistant (score {score:.2f})")
+    if score >= model.threshold:
+        return Finding("intent_classifier", f"classifier: possible instruction to the assistant, review (score {score:.2f})")
+    return None
+
+
+def analyze(request: AnalyzeRequest, classifier: bool = False) -> AnalyzeResponse:
     findings: List[Finding] = []
     prompt_attack = _attacks(detect_prompt_injection, request.prompt)
     findings += prompt_attack + detect_pii(request.prompt)
+    verdict = _classify(request.prompt) if classifier and not prompt_attack else None
+    if verdict:
+        findings.append(verdict)
+        if verdict.tag == "prompt_injection":
+            prompt_attack = [verdict]  # same handling as a rule hit: the prompt is removed
 
     docs: List[SanitizedDoc] = []
     doc_attacks: List[List[Finding]] = []
@@ -70,7 +95,8 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     return AnalyzeResponse(
         decision=decide(score),
         risk_score=score,
-        risk_tags=[tag for tag in POLICY["detectors"] if tag in found_tags],
+        risk_tags=[tag for tag in POLICY["detectors"] if tag in found_tags]
+        + (["intent_classifier"] if "intent_classifier" in found_tags else []),
         sanitized_prompt=_sanitize(request.prompt, prompt_attack, "prompt injection"),
         sanitized_context_docs=docs,
         reasons=[Reason(tag=f.tag, evidence=f.evidence) for f in findings],

@@ -1,7 +1,25 @@
+# Keep the Docker build context small and free of secrets.
+.git/
 __pycache__/
+*.pyc
 .pytest_cache/
 .venv/
-.git/
+venv/
+
+.env
+.env.*
 out.json
 *.pdf
+
 interview-notes/
+reqguard.yaml
+reqguard-report/
+reqguard-test/
+requirements.md
+classifier/data/
+
+.vscode/
+.idea/
+.kiro/
+.DS_Store
+Thumbs.db
